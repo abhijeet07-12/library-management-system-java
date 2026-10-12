@@ -1,6 +1,6 @@
-
 package com.library.library_management;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
@@ -9,9 +9,11 @@ import java.util.List;
 public class BookController {
 
     private final BookRepository bookRepository;
+    private final LoanRepository loanRepository;
 
-    public BookController(BookRepository bookRepository) {
+    public BookController(BookRepository bookRepository, LoanRepository loanRepository) {
         this.bookRepository = bookRepository;
+        this.loanRepository = loanRepository;
     }
 
     @GetMapping
@@ -26,6 +28,10 @@ public class BookController {
 
     @DeleteMapping("/{id}")
     public void deleteBook(@PathVariable Long id) {
+        if (loanRepository.existsByBookId(id)) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "This book has borrowing records and cannot be deleted.");
+        }
         bookRepository.deleteById(id);
     }
 }

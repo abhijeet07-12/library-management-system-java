@@ -1,8 +1,7 @@
-/* Library app inside the book. Talks only to the existing endpoints:
-   GET /api/books, POST /api/books, DELETE /api/books/{id}. */
+/* Library app inside the book: /api/books, /api/members and /api/loans. */
 (() => {
   'use strict';
-  const API_URL = '/api/books';
+  const API_URL = '/api/books', MEMBERS_URL = '/api/members', LOANS_URL = '/api/loans';
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
   const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
@@ -13,7 +12,9 @@
     const res = await fetch(url, options);
     if (!res.ok) {
       const details = await res.text();
-      throw new Error(details || `Request failed (${res.status})`);
+      let msg = details;
+      try { const j = JSON.parse(details); msg = j.error || j.message || details; } catch (e) { /* plain text */ }
+      throw new Error(msg || `Request failed (${res.status})`);
     }
     if (res.status === 204) return null;
     return (res.headers.get('content-type') || '').includes('application/json') ? res.json() : null;
@@ -143,17 +144,19 @@
   });
 
   /* ---- delete (with confirmation) ---- */
-  function confirmDelete(title) {
+  function confirmDelete(message, heading = 'Remove this book?', okLabel = 'Delete') {
     return new Promise(resolve => {
       const d = $('#delDlg');
-      $('#delMsg').textContent = `“${title || 'This book'}” will be permanently removed from the catalogue.`;
+      $('#delT').textContent = heading;
+      $('#delOk').textContent = okLabel;
+      $('#delMsg').textContent = message;
       d.returnValue = '';
       d.addEventListener('close', () => resolve(d.returnValue === 'ok'), { once: true });
       d.showModal();
     });
   }
   async function remove(id, title) {
-    if (!(await confirmDelete(title))) return;
+    if (!(await confirmDelete(`“${title || 'This book'}” will be permanently removed from the catalogue.`))) return;
     try {
       await apiRequest(`${API_URL}/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast(`“${title || 'Book'}” removed`);
@@ -175,6 +178,204 @@
   $('#filter').addEventListener('change', renderShelf);
   $('#refresh').addEventListener('click', load);
 
+
+  /* ================= OPERATIONS: loans, members, history ================= */
+  let members = [], loans = [], offset = 0, opsState = 'loading', opsErr = '';
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = iso => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  const localInput = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const nowMs = () => Date.now() + offset;       // corrected by the server clock; display only
+
+  /* The server stores issue/due/return timestamps. This only formats the time left. */
+  function countdown(l) {
+    if (l.returnedAt) return l.lateReturn ? { text: 'Returned late', cls: 'out' } : { text: 'Returned', cls: 'in' };
+    const ms = new Date(l.dueAt).getTime() - nowMs(), a = Math.abs(ms);
+    const d = Math.floor(a / 864e5), h = Math.floor(a % 864e5 / 36e5), m = Math.floor(a % 36e5 / 6e4);
+    if (ms < 0) return { text: d ? `${pad(d)}d ${pad(h)}h OVERDUE` : h ? `${pad(h)}h ${pad(m)}m OVERDUE` : `${pad(m)}m OVERDUE`, cls: 'bad' };
+    if (ms < 36e5) return { text: `DUE TODAY · ${pad(m)}m remaining`, cls: 'out' };
+    if (ms < 864e5) return { text: `${pad(h)}h ${pad(m)}m remaining`, cls: 'out' };
+    return { text: `${pad(d)}d ${pad(h)}h ${pad(m)}m remaining`, cls: 'in' };
+  }
+  function paint(n) {
+    const c = countdown(n._loan);
+    n.className = 'pill cd ' + c.cls;
+    if (n.textContent !== c.text) n.textContent = c.text;
+  }
+  setInterval(() => $$('.cd').forEach(paint), 1000);
+
+  const openLoans = () => loans.filter(l => !l.returnedAt);
+
+  function loanRow(l, withReturn) {
+    const li = el('li', 'card loan');
+    const mini = el('div', 'mini', initials(l.bookTitle));
+    mini.style.setProperty('--h', hue(l.bookTitle));
+    mini.setAttribute('aria-hidden', 'true');
+    const info = el('div', 'info');
+    info.append(el('strong', '', l.bookTitle), el('span', '', `${l.memberName} · ${l.membershipId}`),
+      el('small', '', l.returnedAt ? `Issued ${fmt(l.issuedAt)} · Returned ${fmt(l.returnedAt)}` : `Issued ${fmt(l.issuedAt)} · Due ${fmt(l.dueAt)}`));
+    const cd = el('span', 'pill cd'); cd._loan = l; paint(cd);
+    info.append(cd);
+    li.append(mini, info);
+    if (withReturn) {
+      const b = el('button', 'ghost', 'Return');
+      b.type = 'button';
+      b.setAttribute('aria-label', `Return ${l.bookTitle}`);
+      b.addEventListener('click', () => giveBack(l, b));
+      li.append(b);
+    }
+    return li;
+  }
+
+  function opsBlock(box) {
+    if (opsState === 'loading') { stateBox(box, 'loading', 'Loading…'); return true; }
+    if (opsState === 'error') { stateBox(box, 'error', opsErr || 'Could not load data.', 'Try again', loadOps); return true; }
+    return false;
+  }
+
+  function renderLoans() {
+    const box = $('#loanList'), list = openLoans().sort((a, b) => new Date(a.dueAt) - new Date(b.dueAt));
+    $('#loanCount').textContent = opsState === 'ready' ? `${list.length} active · ${list.filter(l => countdown(l).cls === 'bad').length} overdue` : '';
+    if (opsBlock(box)) return;
+    if (!list.length) return stateBox(box, 'empty', 'No books are currently on loan.', 'Issue a book', openIssue);
+    const ul = el('ul', 'cards'); list.forEach(l => ul.append(loanRow(l, true))); box.replaceChildren(ul);
+  }
+
+  function renderMembers() {
+    const box = $('#memberList'), q = $('#mq').value.trim().toLowerCase();
+    if (opsBlock(box)) return;
+    const list = members.filter(m => [m.name, m.membershipId, m.email, m.phone].some(v => String(v ?? '').toLowerCase().includes(q)));
+    if (!members.length) return stateBox(box, 'empty', 'No members registered yet.', 'Add a member', openMember);
+    if (!list.length) return stateBox(box, 'empty', 'No members match your search.');
+    const ul = el('ul', 'cards');
+    list.forEach(m => {
+      const li = el('li', 'card mem'), mini = el('div', 'mini', initials(m.name));
+      mini.style.setProperty('--h', hue(m.name)); mini.setAttribute('aria-hidden', 'true');
+      const info = el('div', 'info');
+      info.append(el('strong', '', m.name), el('span', '', m.membershipId));
+      const contact = [m.email, m.phone].filter(Boolean).join(' · ');
+      if (contact) info.append(el('small', '', contact));
+      const n = openLoans().filter(l => l.memberId === m.id).length;
+      li.append(mini, info, n ? el('span', 'pill out', `${n} on loan`) : el('span'));
+      const del = el('button', 'ghost danger', 'Delete');
+      del.type = 'button'; del.setAttribute('aria-label', `Delete member ${m.name}`);
+      del.addEventListener('click', () => removeMember(m));
+      li.append(del); ul.append(li);
+    });
+    box.replaceChildren(ul);
+  }
+
+  function renderHistory() {
+    const box = $('#histList'), q = $('#hq').value.trim().toLowerCase(), f = $('#hf').value;
+    if (opsBlock(box)) return;
+    const kind = l => l.returnedAt ? 'returned' : countdown(l).cls === 'bad' ? 'overdue' : 'active';
+    const list = loans.filter(l => (f === 'all' || kind(l) === f) &&
+      [l.bookTitle, l.memberName, l.membershipId].some(v => String(v ?? '').toLowerCase().includes(q)));
+    if (!loans.length) return stateBox(box, 'empty', 'No borrowing records yet.');
+    if (!list.length) return stateBox(box, 'empty', 'No records match your filters.');
+    const ul = el('ul', 'cards'); list.forEach(l => ul.append(loanRow(l, false))); box.replaceChildren(ul);
+  }
+
+  const renderOps = () => { renderLoans(); renderMembers(); renderHistory(); };
+
+  async function loadOps() {
+    opsState = 'loading'; renderOps();
+    try {
+      const [m, l] = await Promise.all([apiRequest(MEMBERS_URL), apiRequest(LOANS_URL)]);
+      members = Array.isArray(m) ? m : []; loans = Array.isArray(l) ? l : [];
+      if (loans.length) offset = new Date(loans[0].serverNow).getTime() - Date.now();
+      opsState = 'ready';
+    } catch (e) { members = []; loans = []; opsState = 'error'; opsErr = e.message; }
+    renderOps();
+  }
+  const refreshAll = () => Promise.all([load(), loadOps()]);
+
+  async function giveBack(l, btn) {
+    btn.disabled = true;
+    try {
+      await apiRequest(`${LOANS_URL}/${encodeURIComponent(l.id)}/return`, { method: 'POST' });
+      toast(`“${l.bookTitle}” returned`);
+      await refreshAll();
+    } catch (e) { toast('Could not return book: ' + e.message, 'err'); btn.disabled = false; }
+  }
+
+  async function removeMember(m) {
+    if (!(await confirmDelete(`${m.name} (${m.membershipId}) will be removed from the member list.`, 'Remove this member?'))) return;
+    try {
+      await apiRequest(`${MEMBERS_URL}/${encodeURIComponent(m.id)}`, { method: 'DELETE' });
+      toast(`${m.name} removed`);
+      await loadOps();
+    } catch (e) { toast('Could not delete member: ' + e.message, 'err'); }
+  }
+
+  /* ---- issue dialog ---- */
+  const issueDlg = $('#issueDlg'), issueErr = $('#issueErr');
+  function updateDue() {
+    const v = $('#iDate').value, days = Number($('#iDays').value);
+    const start = v ? new Date(v) : new Date();
+    $('#iDue').textContent = isNaN(start) ? '' : `Due ${fmt(new Date(start.getTime() + days * 864e5))} (confirmed by the server on issue)`;
+  }
+  function fillSelect(sel, items, placeholder) {
+    sel.replaceChildren(new Option(placeholder, ''), ...items.map(([v, t]) => new Option(t, v)));
+  }
+  function openIssue() {
+    issueErr.textContent = '';
+    const onLoan = new Set(openLoans().map(l => l.bookId));
+    const free = books.filter(b => isIn(b) && !onLoan.has(idOf(b)));
+    fillSelect($('#iBook'), free.map(b => [idOf(b), `${b.title} — ${b.author}`]), free.length ? 'Select a book' : 'No books available');
+    fillSelect($('#iMember'), members.map(m => [m.id, `${m.name} (${m.membershipId})`]), members.length ? 'Select a member' : 'No members registered');
+    const now = new Date();
+    $('#iDate').value = localInput(now); $('#iDate').max = localInput(new Date(now.getTime() + 36e5));
+    updateDue(); issueDlg.showModal();
+  }
+  $('#issueOpen').addEventListener('click', openIssue);
+  $('#issueCancel').addEventListener('click', () => issueDlg.close());
+  $('#iDate').addEventListener('input', updateDue);
+  $('#iDays').addEventListener('change', updateDue);
+  $('#issueForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const bookId = $('#iBook').value, memberId = $('#iMember').value;
+    if (!bookId || !memberId) { issueErr.textContent = 'Please select both a book and a member.'; return; }
+    const payload = { bookId: Number(bookId), memberId: Number(memberId), days: Number($('#iDays').value) };
+    if ($('#iDate').value) payload.issuedAt = new Date($('#iDate').value).toISOString();
+    const btn = $('#issueBtn'); btn.disabled = true; btn.textContent = 'Issuing…'; issueErr.textContent = '';
+    try {
+      const l = await apiRequest(LOANS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      issueDlg.close();
+      toast(`Issued — due ${fmt(l.dueAt)}`);
+      await refreshAll();
+    } catch (e) { issueErr.textContent = 'Could not issue book: ' + e.message; }
+    finally { btn.disabled = false; btn.textContent = 'Issue book'; }
+  });
+
+  /* ---- member dialog ---- */
+  const memberDlg = $('#memberDlg'), memberErr = $('#memberErr');
+  function openMember() { memberErr.textContent = ''; memberDlg.showModal(); $('#mName').focus(); }
+  $('#memberOpen').addEventListener('click', openMember);
+  $('#memberCancel').addEventListener('click', () => memberDlg.close());
+  $('#memberForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const body = { name: $('#mName').value.trim(), membershipId: $('#mId').value.trim(), email: $('#mEmail').value.trim(), phone: $('#mPhone').value.trim() };
+    if (!body.name || !body.membershipId) { memberErr.textContent = 'Please enter the member name and ID.'; return; }
+    const btn = $('#memberBtn'); btn.disabled = true; btn.textContent = 'Adding…'; memberErr.textContent = '';
+    try {
+      await apiRequest(MEMBERS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      $('#memberForm').reset(); memberDlg.close();
+      toast('Member registered');
+      await loadOps();
+    } catch (e) { memberErr.textContent = 'Could not add member: ' + e.message; }
+    finally { btn.disabled = false; btn.textContent = 'Add member'; }
+  });
+
+  /* ---- sub-views and filters ---- */
+  $$('.seg button').forEach(b => b.addEventListener('click', () => {
+    $$('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    $$('.opv').forEach(p => { p.hidden = p.id !== 'v-' + b.dataset.v; });
+  }));
+  $('#mq').addEventListener('input', renderMembers);
+  $('#hq').addEventListener('input', renderHistory);
+  $('#hf').addEventListener('change', renderHistory);
+
   setChapter(window.LB.chapter);
   load();
+  loadOps();
 })();

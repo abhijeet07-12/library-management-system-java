@@ -129,6 +129,19 @@ dialog label.chk{display:flex;gap:10px;align-items:center;text-transform:none;le
 .toast{padding:12px 16px;border-radius:10px;background:#101a2b;border:1px solid var(--line);border-left:3px solid var(--cy);font-size:14px;box-shadow:0 14px 40px rgba(0,0,0,.5);animation:pop .3s both;transition:opacity .3s}
 .toast.err{border-left-color:#ff6b7a}.toast.gone{opacity:0}
 
+/* ---- operations: members, loans, history ---- */
+.seg{display:flex;gap:4px;padding:3px;margin-bottom:12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.03)}
+.seg button{flex:1;padding:8px 6px;border:0;border-radius:7px;background:transparent;color:var(--mute);font:600 12px var(--sans);letter-spacing:.06em;cursor:pointer;transition:background .2s,color .2s}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed=true]{background:rgba(76,201,240,.12);color:var(--ink);box-shadow:inset 0 0 0 1px rgba(76,201,240,.35)}
+.pill.bad{color:#ff8b94;border-color:rgba(255,107,122,.42)}
+.card.loan{grid-template-columns:44px 1fr auto;align-items:start}
+.loan .info small{margin-top:2px}
+.loan .pill{display:inline-block;margin-top:6px;letter-spacing:.08em;white-space:nowrap}
+.card.mem{grid-template-columns:44px 1fr auto auto}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.due{margin:14px 0 0;font:15px/1.4 var(--serif);color:#b4c0d4;min-height:22px}
+
 @keyframes enter{from{opacity:0;transform:translateY(26px) scale(.97)}}
 @keyframes rise{from{opacity:0;transform:translateY(12px);filter:blur(5px)}}
 @keyframes turn{from{opacity:0;transform:translateX(18px)}}
@@ -151,7 +164,7 @@ dialog label.chk{display:flex;gap:10px;align-items:center;text-transform:none;le
 .flat .page{position:relative;width:auto;height:auto;transform:none!important;backface-visibility:visible;overflow:visible;padding:26px 20px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line)}
 .flat .left{order:1;inset:auto}.flat .right{order:2}
 .flat .scroll{height:auto;max-height:60vh}
-.flat .card{grid-template-columns:44px 1fr auto}.flat .card .danger{grid-column:2/-1;justify-self:start}
+.flat .card,.flat .card.mem{grid-template-columns:44px 1fr auto}.flat .card .danger{grid-column:2/-1;justify-self:start}
 .flat .bar{flex-wrap:wrap}.flat .count{margin-left:0}
 .flat .sum{margin-top:24px}
 @media (prefers-reduced-motion:reduce){*,::before,::after{animation:none!important;transition:none!important}}

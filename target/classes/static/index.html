@@ -55,12 +55,37 @@
       <section class="ch" id="ch2" hidden>
         <p class="eyebrow">Chapter III</p>
         <h2>Library Operations</h2>
-        <p class="lead">The current backend exposes only <code>/api/books</code>. These areas need endpoints that do not exist yet, so nothing here is interactive.</p>
-        <ul class="ops">
-          <li><strong>Members</strong><span>Not supported by the API</span></li>
-          <li><strong>Issue &amp; return</strong><span>Not supported by the API</span></li>
-          <li><strong>Borrowing records</strong><span>Not supported by the API</span></li>
-        </ul>
+        <div class="seg" role="group" aria-label="Operations view">
+          <button type="button" data-v="loans" aria-pressed="true">Active loans</button>
+          <button type="button" data-v="members" aria-pressed="false">Members</button>
+          <button type="button" data-v="history" aria-pressed="false">History</button>
+        </div>
+        <div class="opv" id="v-loans">
+          <div class="bar">
+            <button class="primary" id="issueOpen" type="button">Issue book</button>
+            <span class="count" id="loanCount" role="status"></span>
+          </div>
+          <div class="scroll" id="loanList"></div>
+        </div>
+        <div class="opv" id="v-members" hidden>
+          <div class="bar">
+            <input id="mq" type="search" placeholder="Search name, ID, email" aria-label="Search members" autocomplete="off">
+            <button class="primary" id="memberOpen" type="button">Add member</button>
+          </div>
+          <div class="scroll" id="memberList"></div>
+        </div>
+        <div class="opv" id="v-history" hidden>
+          <div class="bar">
+            <input id="hq" type="search" placeholder="Search book or member" aria-label="Search borrowing history" autocomplete="off">
+            <select id="hf" aria-label="Filter by status">
+              <option value="all">All records</option>
+              <option value="active">Active</option>
+              <option value="overdue">Overdue</option>
+              <option value="returned">Returned</option>
+            </select>
+          </div>
+          <div class="scroll" id="histList"></div>
+        </div>
       </section>
     </section>
 
@@ -111,13 +136,56 @@
   </form>
 </dialog>
 
+<dialog id="issueDlg" aria-labelledby="issueT">
+  <form id="issueForm" novalidate>
+    <h2 id="issueT">Issue a book</h2>
+    <label for="iBook">Book *</label>
+    <select id="iBook" required></select>
+    <label for="iMember">Member *</label>
+    <select id="iMember" required></select>
+    <div class="row2">
+      <div><label for="iDate">Issue date &amp; time</label><input type="datetime-local" id="iDate"></div>
+      <div><label for="iDays">Duration</label>
+        <select id="iDays">
+          <option value="3">3 days</option><option value="7" selected>7 days</option><option value="10">10 days</option>
+          <option value="14">14 days</option><option value="30">30 days</option>
+        </select></div>
+    </div>
+    <p class="due" id="iDue" aria-live="polite"></p>
+    <p class="formErr" id="issueErr" role="alert"></p>
+    <div class="acts">
+      <button type="button" class="ghost" id="issueCancel">Cancel</button>
+      <button type="submit" class="primary" id="issueBtn">Issue book</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="memberDlg" aria-labelledby="memT">
+  <form id="memberForm" novalidate>
+    <h2 id="memT">Add a member</h2>
+    <label for="mName">Full name *</label>
+    <input id="mName" required maxlength="100" placeholder="Enter member name">
+    <label for="mId">Member / student ID *</label>
+    <input id="mId" required maxlength="30" placeholder="e.g. CS2024-001">
+    <div class="row2">
+      <div><label for="mEmail">Email</label><input id="mEmail" type="email" maxlength="120" placeholder="Optional"></div>
+      <div><label for="mPhone">Phone</label><input id="mPhone" type="tel" maxlength="20" placeholder="Optional"></div>
+    </div>
+    <p class="formErr" id="memberErr" role="alert"></p>
+    <div class="acts">
+      <button type="button" class="ghost" id="memberCancel">Cancel</button>
+      <button type="submit" class="primary" id="memberBtn">Add member</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="delDlg" aria-labelledby="delT">
   <form method="dialog">
     <h2 id="delT">Remove this book?</h2>
     <p id="delMsg" class="lead"></p>
     <div class="acts">
       <button value="cancel" class="ghost">Cancel</button>
-      <button value="ok" class="ghost danger">Delete</button>
+      <button value="ok" class="ghost danger" id="delOk">Delete</button>
     </div>
   </form>
 </dialog>
