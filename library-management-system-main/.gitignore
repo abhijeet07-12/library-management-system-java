@@ -25,3 +25,12 @@ replay_pid*
 
 # Local H2 database files
 data/
+
+# Local secrets / env files
+.env
+.env.*
+*.local.properties
+application-local.properties
+
+# H2 backups
+data-backup/
